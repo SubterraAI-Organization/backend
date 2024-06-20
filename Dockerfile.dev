@@ -1,0 +1,24 @@
+FROM python:3.10
+
+ENV PYTHONDONTWRITEBYTECODE 1
+ENV PYTHONUNBUFFERED 1
+
+RUN apt-get update && apt-get install ffmpeg libsm6 libxext6  -y
+
+WORKDIR /app
+
+# Create logs directory
+RUN mkdir -p /app/logs
+
+# Set permissions
+RUN chmod -R 755 /app/logs
+
+COPY requirements.txt requirements.txt
+
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY . .
+
+EXPOSE 8000/tcp
+
+CMD ["python", "manage.py", "runserver", "0.0.0.0:8000"]

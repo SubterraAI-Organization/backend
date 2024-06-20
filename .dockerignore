@@ -1,0 +1,10 @@
+media
+frontend
+logs
+output
+
+segmentation/checkpoints
+
+*.sqlite3
+venv
+node_modules

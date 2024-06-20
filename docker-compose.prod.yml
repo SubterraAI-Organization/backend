@@ -1,0 +1,119 @@
+version: '3.8'
+
+services:
+  app:
+    restart: unless-stopped
+    image: c4thebomb/rhizotron:${TAG:-latest}
+    env_file:
+      - path: .env
+        required: true
+    ports:
+      - 0.0.0.0:8000:8000
+    volumes:
+      - media:/app/media
+    networks:
+      - default
+    depends_on:
+      mysqldb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://app:8000/metrics"]
+      interval: 10s
+      timeout: 15s
+      retries: 10
+      start_period: 30s
+  worker:
+    restart: unless-stopped
+    image: c4thebomb/rhizotron:${TAG:-latest}
+    env_file:
+      - path: .env
+        required: true
+    volumes:
+      - media:/app/media
+    networks:
+      - default
+    depends_on:
+      app:
+        condition: service_healthy
+    command: >
+      bash -c "python manage.py qcluster"
+  client:
+    restart: unless-stopped
+    image: c4thebomb/rhizotron-client:${TAG:-latest}
+    env_file:
+      - path: .env
+        required: true
+    ports:
+      - 0.0.0.0:5173:3000
+    networks:
+      - default
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://client:5173/"]
+      interval: 10s
+      timeout: 15s
+      retries: 10
+      start_period: 30s
+  mysqldb:
+    restart: unless-stopped
+    image: mysql:8.3
+    ports:
+      - 3306:3306
+    volumes:
+      - mysql:/var/lib/mysql
+    networks:
+      - default
+    environment:
+      MYSQL_ROOT_PASSWORD: "passw0rd"
+      MYSQL_DATABASE: "rhizotron"
+      MYSQL_USER: "rhizotron"
+      MYSQL_PASSWORD: "passw0rd"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      timeout: 5s
+      retries: 10
+  redis:
+    restart: unless-stopped
+    image: redis:7.2.4
+    ports:
+      - 6379:6379
+    volumes:
+      - redis:/data
+    networks:
+      - default
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 15s
+      retries: 10
+      start_period: 30s
+  prometheus:
+    restart: unless-stopped
+    image: bitnami/prometheus:2.51.1
+    ports:
+      - 9090:9090
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus:/prometheus
+    networks:
+      - default
+  grafana:
+    restart: unless-stopped
+    image: grafana/grafana:10.3.5
+    ports:
+      - 3000:3000
+    volumes:
+      - grafana:/var/lib/grafana
+    networks:
+      - default
+
+volumes:
+  mysql: {}
+  media: {}
+  grafana: {}
+  prometheus: {}
+  redis: {}
+
+networks:
+  default: {}
