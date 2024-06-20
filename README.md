@@ -68,10 +68,4 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## Contact
 
-This project was created by the Shakoor Lab at the Donald Danforth Plant Science Center. If you have any questions, please contact us:
-- Jacob Stanton: [jstanton@danforthcenter.com](mailto:jstanton@danforthcenter.org)
-- Ceferino Patino: [c4patino@gmail.com](mailto:c4patino@gmail.com).
-- Mari DeGracia: [mdegracia@danforthcenter.org](mailto:mdegracia@danforthcenter.org)
-- Nurzaman Ahmed: [nurzaman713@gmail.com](mailto:nurzaman713@gmail.com)
-
 # rootphe
