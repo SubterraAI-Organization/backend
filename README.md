@@ -8,6 +8,16 @@ RhizoRoot.ai is a web application that allows users to segment and analyze root 
 
 ## Usage
 
+Clear Docker Cache
+```sh
+docker system prune -a
+```
+
+To run locally
+```sh
+docker compose -f docker-compose.yml up -d
+```
+
 To use RhizoRoot.ai, you can run the following command:
 
 ```sh

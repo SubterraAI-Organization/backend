@@ -3,7 +3,8 @@
 
 segmentation/checkpoints
 
-logs
+logs/*
+!logs/.gitkeep
 output
 static
 
