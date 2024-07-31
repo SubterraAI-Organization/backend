@@ -13,9 +13,9 @@ Clear Docker Cache
 docker system prune -a
 ```
 
-To run locally
+To run locally (if anything is new)
 ```sh
-docker compose -f docker-compose.yml up -d
+docker compose up --build -d
 ```
 
 To use RhizoRoot.ai, you can run the following command:
