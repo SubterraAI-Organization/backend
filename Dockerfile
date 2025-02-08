@@ -1,4 +1,4 @@
-FROM python:3.10
+FROM python:3.12
 
 ENV PYTHONDONTWRITEBYTECODE 1
 ENV PYTHONUNBUFFERED 1
@@ -8,11 +8,11 @@ RUN apt-get update && apt-get install ffmpeg libsm6 libxext6  -y
 
 WORKDIR /app
 
-RUN pip install gunicorn
+RUN pip install poetry gunicorn
 
-COPY requirements.txt requirements.txt
+COPY pyproject.toml poetry.lock ./
 
-RUN pip install --no-cache-dir -r requirements.txt
+RUN poetry config virtualenvs.create false && poetry install --no-root --no-interaction --no-ansi
 
 COPY . .
 
