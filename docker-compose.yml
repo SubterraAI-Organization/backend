@@ -65,8 +65,6 @@ services:
   mysqldb:
     restart: unless-stopped
     image: mysql:8.3
-    ports:
-      - 3306:3306
     volumes:
       - mysql:/var/lib/mysql
     networks:

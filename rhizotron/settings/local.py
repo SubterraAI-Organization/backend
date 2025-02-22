@@ -1,5 +1,5 @@
+from .defaults import BASE_DIR, Q_CLUSTER
 from .defaults import *
-
 
 DEBUG = True
 

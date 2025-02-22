@@ -15,6 +15,7 @@ from segmentation.utils import masks, file_management, root_analysis
 
 
 class Command(BaseCommand):
+
     def __init__(self):
         self.logger = logging.getLogger('main')
 
@@ -61,27 +62,38 @@ class Command(BaseCommand):
         self.logger.info(f'Using device: {device}')
 
         model = options['model'].get_model(3, 1)
+        match options['model']:
+            case model_type if model_type == ModelType.UNET or model_type.name.startswith('resnet'):
+                checkpoint = torch.load(options['checkpoint'])
 
-        checkpoint = torch.load(options['checkpoint'])
+                model_weights = checkpoint['state_dict']
 
-        model_weights = checkpoint['state_dict']
+                for key in list(model_weights):
+                    model_weights[key.replace('model.', '')] = model_weights.pop(key)
 
-        for key in list(model_weights):
-            model_weights[key.replace('model.', '')] = model_weights.pop(key)
+                model.load_state_dict(model_weights)
+                model.eval()
+            case ModelType.YOLO:
+                model = model(options['checkpoint'], task='segment')
+            case model:
+                raise ValueError(f'The model type {model} is not a supported model.')
 
-        model.load_state_dict(model_weights)
-        model.eval()
         model.to(device)
 
         image_filenames = file_management.get_image_filenames(options['target'], options['recursive'])
 
-        measurements = pd.DataFrame(columns=['image', 'root_count', 'average_root_diameter',
-                                    'total_root_length', 'total_root_area', 'total_root_volume'])
+        measurements = pd.DataFrame(columns=[
+            'image',
+            'root_count',
+            'average_root_diameter',
+            'total_root_length',
+            'total_root_area',
+            'total_root_volume',
+        ])
 
         try:
             for index, image_filename in enumerate(image_filenames):
-                self.logger.info(
-                    f'Running image {index + 1} of {len(image_filenames)}: {image_filename}')
+                self.logger.info(f'Running image {index + 1} of {len(image_filenames)}: {image_filename}')
 
                 original_image = self.get_image(image_filename, options['size'])
 
@@ -99,10 +111,16 @@ class Command(BaseCommand):
                     mask = masks.threshold(mask, options['threshold_area'])
 
                 if options['save_mask']:
-                    Path(os.path.join(options['output'], 'mask', os.path.relpath(os.path.dirname(
-                        image_filename), options['target']))).mkdir(parents=True, exist_ok=True)
-                    cv2.imwrite(os.path.join(options['output'], 'mask', os.path.relpath(os.path.dirname(
-                        image_filename), options['target']), os.path.basename(image_filename)), mask)
+                    Path(
+                        os.path.join(
+                            options['output'],
+                            'mask',
+                            os.path.relpath(os.path.dirname(image_filename), options['target']),
+                        )).mkdir(parents=True, exist_ok=True)
+                    cv2.imwrite(
+                        os.path.join(options['output'], 'mask', os.path.relpath(os.path.dirname(image_filename),
+                                                                                options['target']),
+                                     os.path.basename(image_filename)), mask)
 
                 if options['save_comparison']:
                     figure = plt.figure(figsize=(10, 10))
@@ -114,33 +132,54 @@ class Command(BaseCommand):
                     plt.title('Mask')
                     plt.imshow(mask, cmap='gray')
 
-                    Path(os.path.join(options['output'], 'compare', os.path.relpath(
-                        os.path.dirname(image_filename), options['target']))).mkdir(parents=True, exist_ok=True)
-                    plt.savefig(os.path.join(options['output'], 'compare', os.path.relpath(
-                        os.path.dirname(image_filename), options['target']), os.path.basename(image_filename)))
+                    Path(
+                        os.path.join(
+                            options['output'],
+                            'compare',
+                            os.path.relpath(os.path.dirname(image_filename), options['target']),
+                        )).mkdir(parents=True, exist_ok=True)
+                    plt.savefig(
+                        os.path.join(
+                            options['output'],
+                            'compare',
+                            os.path.relpath(os.path.dirname(image_filename), options['target']),
+                            os.path.basename(image_filename),
+                        ))
 
                     plt.close(figure)
 
                 if options['save_labelme']:
-                    Path(os.path.join(options['output'], 'labelme', os.path.relpath(
-                        os.path.dirname(image_filename), options['target']))).mkdir(parents=True, exist_ok=True)
+                    Path(
+                        os.path.join(
+                            options['output'],
+                            'labelme',
+                            os.path.relpath(os.path.dirname(image_filename), options['target']),
+                        )).mkdir(parents=True, exist_ok=True)
 
                     original_image = original_image.numpy().transpose((1, 2, 0)) * 255
                     original_image = original_image.astype(np.uint8)
                     original_image = cv2.cvtColor(original_image, cv2.COLOR_RGB2BGR)
 
-                    cv2.imwrite(os.path.join(options['output'], 'labelme', os.path.relpath(os.path.dirname(
-                        image_filename), options['target']), os.path.basename(image_filename)), original_image)
+                    cv2.imwrite(
+                        os.path.join(options['output'], 'labelme',
+                                     os.path.relpath(os.path.dirname(image_filename), options['target']),
+                                     os.path.basename(image_filename)), original_image)
 
-                    labelme_json = masks.to_labelme(
-                        os.path.basename(image_filename), mask)
+                    labelme_json = masks.to_labelme(os.path.basename(image_filename), mask)
 
-                    with open(os.path.join(options['output'], 'labelme',
-                                           os.path.relpath(os.path.dirname(image_filename), options['target']),
-                                           os.path.basename(image_filename).upper().replace('.PNG', '.json')), 'w') as f:
+                    with open(
+                            os.path.join(
+                                options['output'],
+                                'labelme',
+                                os.path.relpath(os.path.dirname(image_filename), options['target']),
+                                os.path.basename(image_filename).upper().replace('.PNG', '.json'),
+                            ), 'w') as f:
                         f.write(labelme_json)
 
-                measurements.loc[index] = {'image': image_filename, **root_analysis.calculate_metrics(mask, options['scaling_factor'])}
+                measurements.loc[index] = {
+                    'image': image_filename,
+                    **root_analysis.calculate_metrics(mask, options['scaling_factor'])
+                }
 
                 self.logger.info(f'Completed image {index + 1} of {len(image_filenames)}: {image_filename}')
         except KeyboardInterrupt:

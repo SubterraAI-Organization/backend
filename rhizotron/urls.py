@@ -24,11 +24,14 @@ from drf_spectacular.views import SpectacularAPIView, SpectacularRedocView, Spec
 urlpatterns = [
     path('', include('processing.urls')),
     path('', include('django_prometheus.urls')),
-
     path('api/', include('rest_framework.urls')),
     path('api/schema/', SpectacularAPIView.as_view(), name='schema'),
-    path('api/schema/swagger/', SpectacularSwaggerView.as_view(), name='schema-swagger'),
-    path('api/schema/redoc/', SpectacularRedocView.as_view(), name='schema-redoc'),
-
+    path('api/schema/swagger/',
+         SpectacularSwaggerView.as_view(),
+         name='schema-swagger'),
+    path('api/schema/redoc/',
+         SpectacularRedocView.as_view(),
+         name='schema-redoc'),
     path('admin/', admin.site.urls),
-] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT) + static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)
+] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT) + static(
+    settings.STATIC_URL, document_root=settings.STATIC_ROOT)

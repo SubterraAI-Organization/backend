@@ -20,6 +20,7 @@ from processing.models import Dataset, Picture, Mask, Model
 from processing.serializers import DatasetSerializer, PictureSerializer, MaskSerializer, LabelMeSerializer, ModelSerializer
 from processing.permissions import IsOwnerOrReadOnly
 from segmentation import masks, calculate_metrics
+from segmentation.models.model_types import ModelType
 
 
 @extend_schema(tags=['datasets'])
@@ -54,12 +55,10 @@ class DatasetViewSet(viewsets.ModelViewSet):
 
 
 @extend_schema(tags=['pictures'])
-@extend_schema_view(
-    list=extend_schema(summary='List all images in a dataset'),
-    create=extend_schema(summary='Upload a new image'),
-    retrieve=extend_schema(summary='Retrieve an image'),
-    destroy=extend_schema(summary='Delete an image')
-)
+@extend_schema_view(list=extend_schema(summary='List all images in a dataset'),
+                    create=extend_schema(summary='Upload a new image'),
+                    retrieve=extend_schema(summary='Retrieve an image'),
+                    destroy=extend_schema(summary='Delete an image'))
 class PictureViewSet(viewsets.ModelViewSet):
     queryset = Picture.objects.all()
     serializer_class = PictureSerializer
@@ -92,8 +91,10 @@ class PictureViewSet(viewsets.ModelViewSet):
 
         return Response(status=status.HTTP_204_NO_CONTENT)
 
-    @extend_schema(tags=['masks'], summary='Predict masks for multiple images', parameters=[OpenApiParameter(
-        name='ids', type=str, location='query', required=True)], responses={201: None})
+    @extend_schema(tags=['masks'],
+                   summary='Predict masks for multiple images',
+                   parameters=[OpenApiParameter(name='ids', type=str, location='query', required=True)],
+                   responses={201: None})
     @action(detail=False, methods=['post'], url_path='predict', serializer_class=MaskSerializer)
     def bulk_predict(self, request: HttpRequest, dataset_pk: int = None) -> Response:
         image_ids = request.query_params.get('ids')
@@ -112,12 +113,15 @@ class PictureViewSet(viewsets.ModelViewSet):
                 return Response({'detail': 'Mask already exists for some images.'}, status=status.HTTP_400_BAD_REQUEST)
 
         area_threshold = int(request.data.get('threshold', 15))
+        model_type = request.data.get('model_type', '')
+        model_type = ModelType.get(model_type)
 
-        async_task('processing.services.bulk_predict_images', images, area_threshold)
+        async_task('processing.services.bulk_predict_images', images, model_type, area_threshold)
 
         return Response(status=status.HTTP_201_CREATED)
 
-    @extend_schema(tags=['masks'], summary='Delete predictions for multiple images',
+    @extend_schema(tags=['masks'],
+                   summary='Delete predictions for multiple images',
                    parameters=[OpenApiParameter(name='ids', type=str, location='query', required=True)])
     @bulk_predict.mapping.delete
     def bulk_destroy_predictions(self, request: HttpRequest, dataset_pk: int = None) -> Response:
@@ -147,13 +151,11 @@ class PictureViewSet(viewsets.ModelViewSet):
 
 
 @extend_schema(tags=['masks'])
-@extend_schema_view(
-    list=extend_schema(summary='List all predictions for an image'),
-    create=extend_schema(summary='Predict a mask for an image'),
-    retrieve=extend_schema(summary='Retrieve a prediction'),
-    partial_update=extend_schema(summary='Update a prediction'),
-    destroy=extend_schema(summary='Delete a prediction')
-)
+@extend_schema_view(list=extend_schema(summary='List all predictions for an image'),
+                    create=extend_schema(summary='Predict a mask for an image'),
+                    retrieve=extend_schema(summary='Retrieve a prediction'),
+                    partial_update=extend_schema(summary='Update a prediction'),
+                    destroy=extend_schema(summary='Delete a prediction'))
 class MaskViewSet(viewsets.ModelViewSet):
     serializer_class = MaskSerializer
     permission_classes = [permissions.IsAuthenticatedOrReadOnly, IsOwnerOrReadOnly]
@@ -181,15 +183,17 @@ class MaskViewSet(viewsets.ModelViewSet):
 
         area_threshold = serializer.validated_data['threshold']
 
-        task_id = async_task('processing.services.predict_image', original, area_threshold)
+        model_type = request.data.get('model_type', '')
+        model_type = ModelType.get(model_type)
+
+        task_id = async_task('processing.services.predict_image', original, model_type, area_threshold)
         new_image = result(task_id)
 
         serializer = self.get_serializer(new_image)
 
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
-    def partial_update(self, request: HttpRequest, dataset_pk: int = None,
-                       image_pk: int = None, pk: int = None) -> Response:
+    def partial_update(self, request: HttpRequest, dataset_pk: int = None, image_pk: int = None, pk: int = None) -> Response:
         try:
             original_mask = Mask.objects.get(pk=pk, picture__dataset__owner=request.user)
         except Mask.DoesNotExist:
@@ -203,7 +207,10 @@ class MaskViewSet(viewsets.ModelViewSet):
             return Response({'detail': 'Threshold not provided.'}, status=status.HTTP_400_BAD_REQUEST)
         area_threshold = serializer.validated_data['threshold']
 
-        task_id = async_task('processing.services.update_mask', original_mask, area_threshold)
+        model_type = request.data.get('model_type', '')
+        model_type = ModelType.get(model_type)
+
+        task_id = async_task('processing.services.update_mask', original_mask, model_type, area_threshold)
         serializer = self.get_serializer(result(task_id))
 
         return Response(serializer.data, status=status.HTTP_200_OK)
@@ -246,11 +253,9 @@ class MaskViewSet(viewsets.ModelViewSet):
 
         return Response(instance_serializer.data, status=status.HTTP_201_CREATED)
 
-    @extend_schema(responses={(200, 'application/octet-stream'): OpenApiTypes.BINARY},
-                   summary='Export a mask to LabelMe')
+    @extend_schema(responses={(200, 'application/octet-stream'): OpenApiTypes.BINARY}, summary='Export a mask to LabelMe')
     @action(detail=True, methods=['get'], url_path='labelme')
-    def export_labelme(self, request: HttpRequest, dataset_pk: int = None,
-                       image_pk: int = None, pk: int = None) -> HttpResponse:
+    def export_labelme(self, request: HttpRequest, dataset_pk: int = None, image_pk: int = None, pk: int = None) -> HttpResponse:
         try:
             prediction = self.get_queryset().get(pk=pk)
         except Mask.DoesNotExist:
@@ -272,8 +277,7 @@ class MaskViewSet(viewsets.ModelViewSet):
             with zf.open(os.path.basename(prediction.picture.filename), 'w') as f:
                 image.save(f, format='PNG')
 
-        response = HttpResponse(
-            outfile.getvalue(), content_type='application/octet-stream')
+        response = HttpResponse(outfile.getvalue(), content_type='application/octet-stream')
         response['Content-Disposition'] = f'attachment; filename={prediction.picture.filename_noext}_labelme.zip'
 
         return response
@@ -284,7 +288,10 @@ class MaskViewSet(viewsets.ModelViewSet):
 
         is_owner_or_public = Q(picture__dataset__owner=self.request.user) | Q(picture__dataset__public=True)
 
-        return self.queryset.filter(is_owner_or_public, picture=self.kwargs['image_pk'],)
+        return self.queryset.filter(
+            is_owner_or_public,
+            picture=self.kwargs['image_pk'],
+        )
 
     def get_serializer_class(self) -> Serializer:
         if self.action == 'create_labelme':
@@ -293,13 +300,11 @@ class MaskViewSet(viewsets.ModelViewSet):
 
 
 @extend_schema(tags=['models'])
-@extend_schema_view(
-    list=extend_schema(summary='List all models'),
-    create=extend_schema(summary='Upload a new model'),
-    retrieve=extend_schema(summary='Retrieve a model'),
-    partial_update=extend_schema(summary='Update a model'),
-    destroy=extend_schema(summary='Delete a model')
-)
+@extend_schema_view(list=extend_schema(summary='List all models'),
+                    create=extend_schema(summary='Upload a new model'),
+                    retrieve=extend_schema(summary='Retrieve a model'),
+                    partial_update=extend_schema(summary='Update a model'),
+                    destroy=extend_schema(summary='Delete a model'))
 class ModelViewSet(viewsets.ModelViewSet):
     serializer_class = ModelSerializer
     permission_classes = [permissions.IsAuthenticatedOrReadOnly]

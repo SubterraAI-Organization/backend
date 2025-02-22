@@ -12,14 +12,15 @@ from processing.models import Picture, Mask
 from segmentation.models import ModelType
 
 
-def predict_image(image: Picture, area_threshold: Optional[int] = 0) -> None:
-    model = ModelType.UNET.get_model(in_channels=3, out_channels=1)
-
-    checkpoint = torch.load(
-        Path('segmentation/models/saved_models/unet_saved.pth'))
-
-    model.load_state_dict(checkpoint)
-    model.eval()
+def predict_image(image: Picture, model_type: ModelType, area_threshold: Optional[int] = 0) -> None:
+    model = model_type.get_model(in_channels=3, out_channels=1)
+    match model_type:
+        case ModelType.UNET:
+            checkpoint = torch.load(Path('segmentation/models/saved_models/unet_saved.pth'))
+            model.load_state_dict(checkpoint)
+            model.eval()
+        case ModelType.YOLO:
+            model = model(Path('segmentation/models/saved_models/yolo_saved.pth'))
 
     mask = predict(model, image.image, area_threshold)
 
@@ -38,15 +39,15 @@ def predict_image(image: Picture, area_threshold: Optional[int] = 0) -> None:
     return mask
 
 
-def bulk_predict_images(images: QuerySet[Picture],
-                        area_threshold: Optional[int] = 0) -> None:
-    model = ModelType.UNET.get_model(in_channels=3, out_channels=1)
-
-    checkpoint = torch.load(
-        Path('segmentation/models/saved_models/unet_saved.pth'))
-
-    model.load_state_dict(checkpoint)
-    model.eval()
+def bulk_predict_images(images: QuerySet[Picture], model_type: ModelType, area_threshold: Optional[int] = 0) -> None:
+    model = model_type.get_model(in_channels=3, out_channels=1)
+    match model_type:
+        case ModelType.UNET:
+            checkpoint = torch.load(Path('segmentation/models/saved_models/unet_saved.pth'))
+            model.load_state_dict(checkpoint)
+            model.eval()
+        case ModelType.YOLO:
+            model = model(Path('segmentation/models/saved_models/yolo_saved.pth'))
 
     masks = []
     for image in images:
@@ -61,26 +62,22 @@ def bulk_predict_images(images: QuerySet[Picture],
         mask.save(mask_byte_arr, format='PNG')
 
         mask = File(mask_byte_arr, name=f'{image.filename_noext}_mask.png')
-        masks.append(
-            Mask(picture=image,
-                 image=mask,
-                 threshold=area_threshold,
-                 **metrics))
+        masks.append(Mask(picture=image, image=mask, threshold=area_threshold, **metrics))
 
     masks = Mask.objects.bulk_create(masks)
 
     return masks
 
 
-def update_mask(original_mask: Mask,
-                area_threshold: Optional[int] = 0) -> Mask:
-    model = ModelType.UNET.get_model(in_channels=3, out_channels=1)
-
-    checkpoint = torch.load(
-        Path('segmentation/models/saved_models/unet_saved.pth'))
-
-    model.load_state_dict(checkpoint)
-    model.eval()
+def update_mask(original_mask: Mask, model_type: ModelType, area_threshold: Optional[int] = 0) -> Mask:
+    model = model_type.get_model(in_channels=3, out_channels=1)
+    match model_type:
+        case ModelType.UNET:
+            checkpoint = torch.load(Path('segmentation/models/saved_models/unet_saved.pth'))
+            model.load_state_dict(checkpoint)
+            model.eval()
+        case ModelType.YOLO:
+            model = model(Path('segmentation/models/saved_models/yolo_saved.pth'))
 
     new_mask = predict(model, original_mask.image, area_threshold)
 

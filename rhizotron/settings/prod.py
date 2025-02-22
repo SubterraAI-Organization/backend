@@ -1,8 +1,9 @@
 import os
 
-from .defaults import *
+from rhizotron.settings.defaults import *
 
-SECRET_KEY = os.environ.get('SECRET_KEY', '769!fm4a_2+8g^o^o4ijwd4-z963=zxp=dj-^#&%7#o1uv-qa6')
+SECRET_KEY = os.environ.get(
+    'SECRET_KEY', '769!fm4a_2+8g^o^o4ijwd4-z963=zxp=dj-^#&%7#o1uv-qa6')
 
 DEBUG = True
 CORS_ORIGIN_ALLOW_ALL = DEBUG
@@ -32,4 +33,3 @@ Q_CLUSTER['redis'] = {
     'errors': 'strict',
     'unix_socket_path': None
 }
-
