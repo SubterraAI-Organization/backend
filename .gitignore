@@ -1,16 +1,11 @@
-# Created by https://www.toptal.com/developers/gitignore/api/visualstudiocode,virtualenv,python,django,git
-# Edit at https://www.toptal.com/developers/gitignore?templates=visualstudiocode,virtualenv,python,django,git
+shell.nix
 
-segmentation/checkpoints
+# Created by https://www.toptal.com/developers/gitignore/api/visualstudiocode,virtualenv,python,django,git,direnv
+# Edit at https://www.toptal.com/developers/gitignore?templates=visualstudiocode,virtualenv,python,django,git,direnv
 
-logs/*
-!logs/.gitkeep
-
-media/*
-!media/.gitkeep
-
-output
-static
+### direnv ###
+.direnv
+.envrc
 
 ### Django ###
 *.log
@@ -20,6 +15,7 @@ __pycache__/
 local_settings.py
 db.sqlite3
 db.sqlite3-journal
+media
 
 # If your build process includes running collectstatic, then you probably don't need or want to include staticfiles/
 # in your Git repository. Update and uncomment the following line accordingly.
@@ -319,39 +315,5 @@ pip-selfcheck.json
 .history
 .ionide
 
-# End of https://www.toptal.com/developers/gitignore/api/visualstudiocode,virtualenv,python,django,git
-# Logs
-*.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-lerna-debug.log*
-
-node_modules
-dist
-dist-ssr
-*.local
-
-# Editor directories and files
-.vscode/*
-!.vscode/extensions.json
-.idea
-.DS_Store
-*.suo
-*.ntvs*
-*.njsproj
-*.sln
-*.sw?
-
-# Environmental files
-.env
-# Created by https://www.toptal.com/developers/gitignore/api/direnv
-# Edit at https://www.toptal.com/developers/gitignore?templates=direnv
-
-### direnv ###
-.direnv
-.envrc
-
-# End of https://www.toptal.com/developers/gitignore/api/direnv
+# End of https://www.toptal.com/developers/gitignore/api/visualstudiocode,virtualenv,python,django,git,direnv
 
