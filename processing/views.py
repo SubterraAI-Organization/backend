@@ -34,7 +34,7 @@ from segmentation.models.model_types import ModelType
 class DatasetViewSet(viewsets.ModelViewSet):
     queryset = Dataset.objects.all()
     serializer_class = DatasetSerializer
-    permission_classes = [permissions.IsAuthenticatedOrReadOnly, IsOwnerOrReadOnly]
+    permission_classes = []  # Removed auth permissions
     http_method_names = ['get', 'post', 'patch', 'delete']
 
     def create(self, request: HttpRequest) -> Response:
@@ -42,32 +42,33 @@ class DatasetViewSet(viewsets.ModelViewSet):
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-        serializer.save(owner=request.user)
+        # Assign a default owner (temporary development solution)
+        from django.contrib.auth import get_user_model
+        User = get_user_model()
+        
+        # Get or create a default user
+        user, _ = User.objects.get_or_create(
+            username='system',
+            defaults={'email': 'system@example.com', 'password': 'unsecured'}
+        )
+        
+        serializer.save(owner=user)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
     def get_queryset(self) -> QuerySet[Dataset]:
-        if self.request.user.is_anonymous:
-            return self.queryset.filter(public=True)
+        # Simplified to return all datasets
+        return Dataset.objects.all()
 
-        is_owner_or_public = Q(owner=self.request.user) | Q(public=True)
-
-        return self.queryset.filter(is_owner_or_public)
-
-
-@extend_schema(tags=['pictures'])
-@extend_schema_view(list=extend_schema(summary='List all images in a dataset'),
-                    create=extend_schema(summary='Upload a new image'),
-                    retrieve=extend_schema(summary='Retrieve an image'),
-                    destroy=extend_schema(summary='Delete an image'))
 class PictureViewSet(viewsets.ModelViewSet):
     queryset = Picture.objects.all()
     serializer_class = PictureSerializer
-    permission_classes = [permissions.IsAuthenticatedOrReadOnly, IsOwnerOrReadOnly]
+    permission_classes = []  # Removed auth permissions
     http_method_names = ['get', 'post', 'delete']
 
     def create(self, request: HttpRequest, dataset_pk: int = None) -> Response:
         try:
-            dataset = Dataset.objects.get(pk=dataset_pk, owner=request.user)
+            # Removed owner filter
+            dataset = Dataset.objects.get(pk=dataset_pk)
         except Dataset.DoesNotExist:
             return Response({'detail': 'Dataset not found.'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -158,7 +159,7 @@ class PictureViewSet(viewsets.ModelViewSet):
                     destroy=extend_schema(summary='Delete a prediction'))
 class MaskViewSet(viewsets.ModelViewSet):
     serializer_class = MaskSerializer
-    permission_classes = [permissions.IsAuthenticatedOrReadOnly, IsOwnerOrReadOnly]
+    permission_classes = []  # Removed auth permissions
     queryset = Mask.objects.all()
     http_method_names = ['get', 'post', 'delete', 'patch']
 
@@ -307,7 +308,7 @@ class MaskViewSet(viewsets.ModelViewSet):
                     destroy=extend_schema(summary='Delete a model'))
 class ModelViewSet(viewsets.ModelViewSet):
     serializer_class = ModelSerializer
-    permission_classes = [permissions.IsAuthenticatedOrReadOnly]
+    permission_classes = []  # Removed auth permissions
     queryset = Model.objects.all()
     http_method_names = ['get', 'post', 'patch', 'delete']
 
@@ -316,11 +317,10 @@ class ModelViewSet(viewsets.ModelViewSet):
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-        serializer.save(owner=request.user)
+        # Remove owner assignment
+        serializer.save()
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
     def get_queryset(self) -> QuerySet[Model]:
-        if self.request.user.is_anonymous:
-            return self.queryset.filter(public=True)
-
-        return self.queryset.filter(Q(owner=self.request.user) | Q(public=True))
+        # Return all models
+        return Model.objects.all()

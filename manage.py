@@ -2,6 +2,7 @@
 import os
 import sys
 
+# http://localhost:8000/api/schema/swagger/#/ <---- schema url
 
 def main():
     """Run administrative tasks."""

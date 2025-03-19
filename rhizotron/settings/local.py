@@ -5,6 +5,51 @@ DEBUG = True
 
 ALLOWED_HOSTS = ['*']
 
+# Completely disable authentication
+REST_FRAMEWORK = {
+    'DEFAULT_PERMISSION_CLASSES': [
+        'rest_framework.permissions.AllowAny',
+    ],
+    'DEFAULT_AUTHENTICATION_CLASSES': [],
+    'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
+    'UNAUTHENTICATED_USER': None,
+}
+
+# Remove CSRF middleware and ensure CORS middleware is first
+MIDDLEWARE = [
+    'corsheaders.middleware.CorsMiddleware',
+    'django_prometheus.middleware.PrometheusBeforeMiddleware',
+    'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',
+    'django.contrib.sessions.middleware.SessionMiddleware',
+    'django.middleware.common.CommonMiddleware',
+    # CSRF middleware removed
+    'django.contrib.auth.middleware.AuthenticationMiddleware',
+    'django.contrib.messages.middleware.MessageMiddleware',
+    'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'django_prometheus.middleware.PrometheusAfterMiddleware',
+]
+
+# Maximum CORS permissiveness
+CORS_ORIGIN_ALLOW_ALL = True
+CORS_ALLOW_ALL_ORIGINS = True
+CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOW_METHODS = ['*']
+CORS_ALLOW_HEADERS = ['*']
+CORS_EXPOSE_HEADERS = ['*']
+CORS_PREFLIGHT_MAX_AGE = 86400
+
+# Disable CSRF protection
+CSRF_COOKIE_SECURE = False
+CSRF_COOKIE_HTTPONLY = False
+CSRF_USE_SESSIONS = False
+CSRF_COOKIE_SAMESITE = None
+
+# Session settings
+SESSION_COOKIE_SECURE = False
+SESSION_COOKIE_HTTPONLY = False
+SESSION_COOKIE_SAMESITE = None
+
 DATABASES = {
     'default': {
         'ENGINE': 'django_prometheus.db.backends.sqlite3',

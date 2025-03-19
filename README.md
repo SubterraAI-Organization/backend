@@ -8,6 +8,18 @@ Built using Django, React, and PyTorch, the web application is designed to be us
 
 | [Usage](#usage) | [Directory Structure](#directory-structure) | [License](#license) | [Contact](#contact) |
 
+## Usage
+
+Clear Docker Cache
+```sh
+docker system prune -a
+```
+
+To run locally (if anything is new)
+```sh
+docker compose up --build -d
+```
+
 ---
 
 ## Flexibility and Customization

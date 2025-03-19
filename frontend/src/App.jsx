@@ -1,27 +1,30 @@
 import "./App.css";
 import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
+import { ThemeProvider } from '@mui/material/styles';
+import CssBaseline from '@mui/material/CssBaseline';
 import { MaskDataProvider } from "./context/MaskDataContext.jsx";
 import Footer from "./components/Footer";
 import NavBar from "./components/NavBar";
 import GenerateMask from "./components/GenerateMask";
+import Dashboard from "./components/Dashboard";
+import theme from './theme';
 
 function App() {
   return (
-    <Router>
-      <MaskDataProvider>
-        <NavBar />
-        <Routes>
-          <Route path="/" element={<GenerateMask />} />
-          {/* <Route path="/" element={<Home />} /> */}
-          {/* <Route path="/about" element={<About />} />
-            <Route path="#" element={<QuoteHero />} />
-            <Route path="/team" element={<Team />} />
-            <Route path="/news" element={<Cards />} />
-            <Route path="/contact" element={<Contact />} /> */}
-        </Routes>
-        <Footer />
-      </MaskDataProvider>
-    </Router>
+    <ThemeProvider theme={theme}>
+      <CssBaseline />
+      <Router>
+        <MaskDataProvider>
+          <NavBar />
+          <Routes>
+            <Route path="/" element={<Dashboard />} />
+            <Route path="/legacy" element={<GenerateMask />} />
+            {/* Other routes can be added here */}
+          </Routes>
+          <Footer />
+        </MaskDataProvider>
+      </Router>
+    </ThemeProvider>
   );
 }
 

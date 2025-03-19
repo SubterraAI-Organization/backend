@@ -20,7 +20,7 @@ services:
       redis:
         condition: service_healthy
     command: >
-      bash -c "python manage.py migrate && python manage.py runserver 0.0.0.0:8000"
+      bash -c "python manage.py makemigrations && python manage.py migrate && python manage.py create_default_models && python manage.py runserver 0.0.0.0:8000"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/metrics"]
       interval: 10s
@@ -49,9 +49,9 @@ services:
       context: ./frontend
       dockerfile: Dockerfile.dev
     environment:
-      REACT_APP_AUTHORIZATION: “Basic c2hha29vcjpTaGFrb29yTGFiQDIwMjM=”
-      REACT_APP_CSRFTOKEN: “flmMUwTYYyqFzwrYq7atPr7R7PRubwnZ6XlK6ynZQXDi5txGMjIUaaBt0XxxxFGa”
-      REACT_APP_BACKEND_URL: “http://app:8000"
+      VITE_AUTHORIZATION: "Basic c2hha29vcjpTaGFrb29yTGFiQDIwMjM="
+      VITE_CSRFTOKEN: "flmMUwTYYyqFzwrYq7atPr7R7PRubwnZ6XlK6ynZQXDi5txGMjIUaaBt0XxxxFGa"
+      VITE_BACKEND_URL: "http://localhost:8000" #TODO: change to app:8000 when in prod
     ports:
       - 0.0.0.0:5173:5173
     networks:

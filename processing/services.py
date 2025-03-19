@@ -20,7 +20,7 @@ def predict_image(image: Picture, model_type: ModelType, area_threshold: Optiona
             model.load_state_dict(checkpoint)
             model.eval()
         case ModelType.YOLO:
-            model = model(Path('segmentation/models/saved_models/yolo_saved.pth'))
+            model = model(Path('segmentation/models/saved_models/yolo_saved.pt'))
 
     mask = predict(model, image.image, area_threshold)
 
@@ -47,7 +47,7 @@ def bulk_predict_images(images: QuerySet[Picture], model_type: ModelType, area_t
             model.load_state_dict(checkpoint)
             model.eval()
         case ModelType.YOLO:
-            model = model(Path('segmentation/models/saved_models/yolo_saved.pth'))
+            model = model(Path('segmentation/models/saved_models/yolo_saved.pt'))
 
     masks = []
     for image in images:
@@ -77,7 +77,7 @@ def update_mask(original_mask: Mask, model_type: ModelType, area_threshold: Opti
             model.load_state_dict(checkpoint)
             model.eval()
         case ModelType.YOLO:
-            model = model(Path('segmentation/models/saved_models/yolo_saved.pth'))
+            model = model(Path('segmentation/models/saved_models/yolo_saved.pt'))
 
     new_mask = predict(model, original_mask.image, area_threshold)
 
