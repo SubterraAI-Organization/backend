@@ -16,11 +16,10 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from drf_spectacular.utils import extend_schema, extend_schema_view, OpenApiParameter, OpenApiTypes
 
-from processing.models import Dataset, Picture, Mask, Model
+from processing.models import Dataset, Picture, Mask, Model, ModelType
 from processing.serializers import DatasetSerializer, PictureSerializer, MaskSerializer, LabelMeSerializer, ModelSerializer
 from processing.permissions import IsOwnerOrReadOnly
 from segmentation import masks, calculate_metrics
-from segmentation.models.model_types import ModelType
 
 
 @extend_schema(tags=['datasets'])
@@ -42,17 +41,22 @@ class DatasetViewSet(viewsets.ModelViewSet):
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-        # Assign a default owner (temporary development solution)
+        # Get or create a default user for all datasets in development
         from django.contrib.auth import get_user_model
         User = get_user_model()
         
-        # Get or create a default user
         user, _ = User.objects.get_or_create(
             username='system',
             defaults={'email': 'system@example.com', 'password': 'unsecured'}
         )
         
-        serializer.save(owner=user)
+        # Create the dataset with the system user as owner
+        dataset = serializer.save(owner=user)
+        
+        # Set the dataset as public by default for easier development
+        dataset.public = True
+        dataset.save()
+        
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
     def get_queryset(self) -> QuerySet[Dataset]:
@@ -72,18 +76,53 @@ class PictureViewSet(viewsets.ModelViewSet):
         except Dataset.DoesNotExist:
             return Response({'detail': 'Dataset not found.'}, status=status.HTTP_404_NOT_FOUND)
 
+        # Verify that an image was provided in the request
+        if 'image' not in request.data or not request.data['image']:
+            return Response({'detail': 'No image file provided.'}, status=status.HTTP_400_BAD_REQUEST)
+
         serializer = self.get_serializer(data=request.data)
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-        serializer.save(dataset=dataset)
+        # Explicitly save with the dataset attached
+        picture = serializer.save(dataset=dataset)
+        
+        # Log success for debugging
+        print(f"Successfully created picture with ID: {picture.id} for dataset ID: {dataset_pk}")
+        
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
     @extend_schema(summary='Delete multiple images',
                    parameters=[OpenApiParameter(name='ids', type=str, location='query', required=True)])
     def bulk_destroy(self, request: HttpRequest, dataset_pk: int = None, format: str = None) -> Response:
-        ids = [int(id) for id in request.query_params.get('ids').split(',')]
-        images = self.queryset.filter(id__in=ids, dataset=dataset_pk, dataset__owner=request.user)
+        image_ids = request.query_params.get('ids')
+        
+        if not image_ids:
+            return Response({'detail': 'No image ids provided.'}, status=status.HTTP_400_BAD_REQUEST)
+            
+        # Filter out empty strings before converting to integers
+        ids = [int(id) for id in image_ids.split(',') if id.strip()]
+        
+        if not ids:
+            return Response({'detail': 'No valid image ids provided.'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Handle anonymous or null user    
+        if not hasattr(request, 'user') or request.user is None:
+            return Response({'detail': 'Authentication required.'}, status=status.HTTP_401_UNAUTHORIZED)
+        
+        # Try to get the dataset first
+        try:
+            dataset = Dataset.objects.get(pk=dataset_pk)
+            
+            # Check if user has permission to modify this dataset
+            if dataset.owner != request.user:
+                return Response({'detail': 'You do not have permission to modify this dataset.'}, 
+                               status=status.HTTP_403_FORBIDDEN)
+        except Dataset.DoesNotExist:
+            return Response({'detail': 'Dataset not found.'}, status=status.HTTP_404_NOT_FOUND)
+            
+        # Now get the images
+        images = self.queryset.filter(id__in=ids, dataset=dataset_pk)
 
         if len(ids) != len(images):
             return Response({'detail': 'Some images do not exist.'}, status=status.HTTP_404_NOT_FOUND)
@@ -94,32 +133,74 @@ class PictureViewSet(viewsets.ModelViewSet):
 
     @extend_schema(tags=['masks'],
                    summary='Predict masks for multiple images',
-                   parameters=[OpenApiParameter(name='ids', type=str, location='query', required=True)],
+                   parameters=[
+                       OpenApiParameter(name='ids', type=str, location='query', required=True),
+                       OpenApiParameter(name='confidence_threshold', type=float, location='query', required=False),
+                   ],
                    responses={201: None})
     @action(detail=False, methods=['post'], url_path='predict', serializer_class=MaskSerializer)
     def bulk_predict(self, request: HttpRequest, dataset_pk: int = None) -> Response:
-        image_ids = request.query_params.get('ids')
+        # Check if image id parameter exists
+        ids = request.query_params.get('ids')
+        if not ids:
+            return Response({'detail': 'Missing "ids" parameter.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        if image_ids is None:
-            return Response({'detail': 'No image ids provided.'}, status=status.HTTP_400_BAD_REQUEST)
+        # Get model type from request data
+        model_type_str = request.data.get('model_type', 'unet')
+        confidence_threshold = request.data.get('confidence_threshold', None)
+        threshold = request.data.get('threshold', 0)
+        
+        try:
+            # Try to convert to uppercase to match enum
+            model_type = ModelType[model_type_str.upper()]
+            print(f"Using model type: {model_type}")
+        except (KeyError, AttributeError):
+            print(f"Invalid model type: {model_type_str}, defaulting to UNET")
+            model_type = ModelType.UNET
 
-        ids = [int(id) for id in image_ids.split(',')]
-        images = self.get_queryset().filter(dataset=dataset_pk, id__in=ids)
+        # Parse ids
+        try:
+            ids = [int(id) for id in ids.split(',')]
+        except ValueError:
+            return Response({'detail': 'Invalid "ids" parameter.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        if len(ids) != len(images):
-            return Response({'detail': 'Some images do not exist.'}, status=status.HTTP_400_BAD_REQUEST)
-
-        for image in images:
-            if hasattr(image, 'mask') and image.mask is not None:
-                return Response({'detail': 'Mask already exists for some images.'}, status=status.HTTP_400_BAD_REQUEST)
-
-        area_threshold = int(request.data.get('threshold', 15))
-        model_type = request.data.get('model_type', '')
-        model_type = ModelType.get(model_type)
-
-        async_task('processing.services.bulk_predict_images', images, model_type, area_threshold)
-
-        return Response(status=status.HTTP_201_CREATED)
+        # Get images
+        images = Picture.objects.filter(id__in=ids, dataset_id=dataset_pk)
+        if not images:
+            return Response({'detail': 'No images found.'}, status=status.HTTP_404_NOT_FOUND)
+            
+        print(f"Found {len(images)} images to process with {model_type}")
+        
+        # Process all images directly
+        try:
+            from processing.services import predict_image
+            
+            print(f"Processing {len(images)} images directly")
+            
+            successful_count = 0
+            for image in images:
+                try:
+                    print(f"Processing image {image.id}: {image.filename}")
+                    result = predict_image(image, model_type, area_threshold=threshold, 
+                                          confidence_threshold=confidence_threshold)
+                    if result:
+                        successful_count += 1
+                        print(f"Successfully processed image {image.id}, mask ID: {result.id}")
+                    else:
+                        print(f"Failed to process image {image.id}: No result returned")
+                except Exception as img_err:
+                    print(f"Error processing image {image.id}: {str(img_err)}")
+                    import traceback
+                    traceback.print_exc()
+            
+            print(f"Finished processing images. Success: {successful_count}/{len(images)}")
+            return Response(status=status.HTTP_201_CREATED)
+            
+        except Exception as e:
+            print(f"Error in bulk processing: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return Response({'detail': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     @extend_schema(tags=['masks'],
                    summary='Delete predictions for multiple images',
@@ -131,23 +212,39 @@ class PictureViewSet(viewsets.ModelViewSet):
         if image_ids is None:
             return Response({'detail': 'No image ids provided.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        ids = [int(id) for id in image_ids.split(',')]
+        # Filter out empty strings before converting to integers
+        ids = [int(id) for id in image_ids.split(',') if id.strip()]
+        
+        if not ids:
+            return Response({'detail': 'No valid image ids provided.'}, status=status.HTTP_400_BAD_REQUEST)
+            
+        # Use get_queryset which already handles user authentication properly    
         images = self.get_queryset().filter(dataset=dataset_pk, id__in=ids, mask__isnull=False)
 
         if len(ids) != len(images):
-            return Response({'detail': 'Some images do not exist.'}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'detail': 'Some images do not exist or you do not have permission to access them.'}, status=status.HTTP_400_BAD_REQUEST)
 
         predictions = Mask.objects.filter(picture__dataset=dataset_pk, picture__id__in=ids)
+        
+        # Make sure user has permission to delete these masks
+        if not all(mask.picture.dataset.public or 
+                  (hasattr(request, 'user') and request.user is not None and mask.picture.dataset.owner == request.user) 
+                  for mask in predictions):
+            return Response({'detail': 'You do not have permission to delete some of these masks.'}, 
+                           status=status.HTTP_403_FORBIDDEN)
+        
         predictions.delete()
 
         return Response(status=status.HTTP_204_NO_CONTENT)
 
     def get_queryset(self) -> QuerySet[Picture]:
-        if self.request.user.is_anonymous:
+        # Check if request.user exists and is not anonymous
+        if not hasattr(self.request, 'user') or self.request.user is None or self.request.user.is_anonymous:
+            # For anonymous users or when user is None, only return public datasets
             return self.queryset.filter(dataset=self.kwargs['dataset_pk'], dataset__public=True)
 
+        # For authenticated users, return both their datasets and public datasets
         is_owner_or_public = Q(dataset__owner=self.request.user) | Q(dataset__public=True)
-
         return self.queryset.filter(is_owner_or_public, dataset=self.kwargs['dataset_pk'])
 
 
@@ -170,6 +267,10 @@ class MaskViewSet(viewsets.ModelViewSet):
         return Response(serializer.data, status=status.HTTP_200_OK)
 
     def create(self, request, dataset_pk=None, image_pk=None) -> Response:
+        # Handle anonymous or null user    
+        if not hasattr(request, 'user') or request.user is None:
+            return Response({'detail': 'Authentication required.'}, status=status.HTTP_401_UNAUTHORIZED)
+        
         try:
             original = Picture.objects.get(pk=image_pk, dataset__owner=request.user)
         except Picture.DoesNotExist:
@@ -184,17 +285,47 @@ class MaskViewSet(viewsets.ModelViewSet):
 
         area_threshold = serializer.validated_data['threshold']
 
-        model_type = request.data.get('model_type', '')
-        model_type = ModelType.get(model_type)
+        # Get model type string and validate it
+        model_type_str = request.data.get('model_type', 'unet')
+        if not model_type_str:
+            model_type_str = 'unet'  # Default to UNET
+            
+        # Convert to ModelType enum
+        try:
+            # Try to convert to uppercase to match enum
+            model_type = ModelType[model_type_str.upper()]
+            print(f"Using model type: {model_type}")
+        except (KeyError, AttributeError):
+            print(f"Invalid model type: {model_type_str}, defaulting to UNET")
+            model_type = ModelType.UNET
+        
+        # Extract confidence threshold from request
+        confidence_threshold = request.data.get('confidence_threshold')
+        if confidence_threshold is not None:
+            confidence_threshold = float(confidence_threshold)
 
-        task_id = async_task('processing.services.predict_image', original, model_type, area_threshold)
-        new_image = result(task_id)
+        # Log what we're processing
+        print(f"Processing image {image_pk} with model type {model_type}, area threshold {area_threshold}, and confidence threshold {confidence_threshold}")
 
-        serializer = self.get_serializer(new_image)
-
-        return Response(serializer.data, status=status.HTTP_201_CREATED)
+        try:
+            # Use direct processing instead of async for better debugging
+            from processing.services import predict_image
+            new_image = predict_image(original, model_type, area_threshold, confidence_threshold)
+            if new_image is None:
+                return Response({'detail': 'Error creating mask'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            serializer = self.get_serializer(new_image)
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        except Exception as e:
+            print(f"Error processing image: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return Response({'detail': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     def partial_update(self, request: HttpRequest, dataset_pk: int = None, image_pk: int = None, pk: int = None) -> Response:
+        # Handle anonymous or null user    
+        if not hasattr(request, 'user') or request.user is None:
+            return Response({'detail': 'Authentication required.'}, status=status.HTTP_401_UNAUTHORIZED)
+            
         try:
             original_mask = Mask.objects.get(pk=pk, picture__dataset__owner=request.user)
         except Mask.DoesNotExist:
@@ -208,17 +339,49 @@ class MaskViewSet(viewsets.ModelViewSet):
             return Response({'detail': 'Threshold not provided.'}, status=status.HTTP_400_BAD_REQUEST)
         area_threshold = serializer.validated_data['threshold']
 
-        model_type = request.data.get('model_type', '')
-        model_type = ModelType.get(model_type)
+        # Get model type string and validate it
+        model_type_str = request.data.get('model_type', 'unet')
+        if not model_type_str:
+            model_type_str = 'unet'  # Default to UNET
+            
+        # Convert to ModelType enum
+        try:
+            # Try to convert to uppercase to match enum
+            model_type = ModelType[model_type_str.upper()]
+            print(f"Using model type: {model_type}")
+        except (KeyError, AttributeError):
+            print(f"Invalid model type: {model_type_str}, defaulting to UNET")
+            model_type = ModelType.UNET
+        
+        # Extract confidence threshold from request
+        confidence_threshold = request.data.get('confidence_threshold')
+        if confidence_threshold is not None:
+            confidence_threshold = float(confidence_threshold)
 
-        task_id = async_task('processing.services.update_mask', original_mask, model_type, area_threshold)
-        serializer = self.get_serializer(result(task_id))
+        # Log what we're processing
+        print(f"Updating mask {pk} with model type {model_type}, area threshold {area_threshold}, and confidence threshold {confidence_threshold}")
 
-        return Response(serializer.data, status=status.HTTP_200_OK)
+        try:
+            # Use direct processing instead of async for better debugging
+            from processing.services import update_mask
+            updated_mask = update_mask(original_mask, model_type, area_threshold, confidence_threshold)
+            if updated_mask is None:
+                return Response({'detail': 'Error updating mask'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            serializer = self.get_serializer(updated_mask)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        except Exception as e:
+            print(f"Error updating mask: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return Response({'detail': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     @extend_schema(request=LabelMeSerializer, responses={200: MaskSerializer}, summary='Create a mask using LabelMe')
     @action(detail=False, methods=['post'], url_path='labelme', serializer_class=LabelMeSerializer)
     def create_labelme(self, request: HttpRequest, dataset_pk: int = None, image_pk: int = None) -> Response:
+        # Handle anonymous or null user    
+        if not hasattr(request, 'user') or request.user is None:
+            return Response({'detail': 'Authentication required.'}, status=status.HTTP_401_UNAUTHORIZED)
+            
         serializer = self.get_serializer(data=request.data, partial=True)
 
         if not serializer.is_valid():
@@ -284,9 +447,12 @@ class MaskViewSet(viewsets.ModelViewSet):
         return response
 
     def get_queryset(self) -> QuerySet[Mask]:
-        if self.request.user.is_anonymous:
+        # Check if request.user exists and is not anonymous
+        if not hasattr(self.request, 'user') or self.request.user is None or self.request.user.is_anonymous:
+            # For anonymous users or when user is None, only return masks from public datasets
             return self.queryset.filter(picture=self.kwargs['image_pk'], picture__dataset__public=True)
 
+        # For authenticated users, return both their masks and masks from public datasets
         is_owner_or_public = Q(picture__dataset__owner=self.request.user) | Q(picture__dataset__public=True)
 
         return self.queryset.filter(
@@ -322,5 +488,5 @@ class ModelViewSet(viewsets.ModelViewSet):
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
     def get_queryset(self) -> QuerySet[Model]:
-        # Return all models
+        # Return all models, regardless of user authentication status
         return Model.objects.all()
