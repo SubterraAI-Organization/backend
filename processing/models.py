@@ -49,6 +49,7 @@ class Mask(ExportModelOperationsMixin('mask'), models.Model):
     total_root_length = models.FloatField(default=0)
     total_root_area = models.FloatField(default=0)
     total_root_volume = models.FloatField(default=0)
+    average_root_length = models.FloatField(default=0)
 
     @property
     def filename(self) -> str:
@@ -142,31 +143,24 @@ class ModelType(models.TextChoices):
                 raise
         elif self == ModelType.YOLO:
             try:
-                print(f"Attempting to create YOLO model placeholder")
-                logger.info(f"Attempting to create YOLO model placeholder")
+                from ultralytics import YOLO
+                print(f"Successfully imported YOLO from ultralytics")
+                logger.info(f"Successfully imported YOLO from ultralytics")
                 
-                # Create a placeholder model that will be replaced when loading the weights
-                from torch import nn
-                class YOLOPlaceholder(nn.Module):
-                    def __init__(self):
-                        super().__init__()
-                        self.placeholder = nn.Conv2d(in_channels, out_channels, 1)
-                        
-                    def __call__(self, checkpoint_path):
-                        """This will be called when loading the model with the checkpoint"""
-                        try:
-                            from ultralytics import YOLO
-                            print(f"Using ultralytics.YOLO to load model from {checkpoint_path}")
-                            return YOLO(checkpoint_path)
-                        except Exception as e:
-                            print(f"Failed to load YOLO using ultralytics: {str(e)}")
-                            print(f"Attempting alternate loading method")
-                            # Fallback to other methods or raise the error
-                            raise e
+                # Find YOLO weights
+                weights_path = kwargs.get('weights_path')
+                if not weights_path:
+                    # Default location for YOLO weights
+                    weights_path = os.path.join(base_dir, 'segmentation', 'models', 'saved_models', 'yolo_saved.pt')
+                if not os.path.exists(weights_path):
+                    error_msg = f"YOLO weights not found at {weights_path}"
+                    print(error_msg)
+                    logger.error(error_msg)
+                    raise FileNotFoundError(error_msg)
                 
-                model = YOLOPlaceholder()
-                print(f"YOLO placeholder model created successfully")
-                logger.info(f"YOLO placeholder model created successfully")
+                model = YOLO(weights_path)
+                print(f"YOLO model loaded successfully from {weights_path}")
+                logger.info(f"YOLO model loaded successfully from {weights_path}")
                 return model
             except Exception as e:
                 error_msg = f"Error creating YOLO model: {str(e)}"

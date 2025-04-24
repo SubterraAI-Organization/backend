@@ -18,13 +18,16 @@ function MaskResults() {
   }
 
   const convertToCSV = (objArray) => {
-    const array = [objArray];
-    const csv = array.map((row) =>
-      Object.keys(row)
-        .map((fieldName) => JSON.stringify(row[fieldName], replacer))
-        .join(",")
-    );
-    csv.unshift(Object.keys(objArray).join(",")); // Add header row
+    // If maskData contains imageName, use it as first column
+    const keys = Object.keys(objArray);
+    let header = keys;
+    let row = keys.map((key) => JSON.stringify(objArray[key], replacer));
+    if (objArray.imageName) {
+      // Move imageName to first column if present
+      header = ["imageName", ...keys.filter((k) => k !== "imageName")];
+      row = [JSON.stringify(objArray.imageName.length > 32 ? objArray.imageName.substring(0,29)+"..." : objArray.imageName), ...keys.filter((k) => k !== "imageName").map((key) => JSON.stringify(objArray[key], replacer))];
+    }
+    const csv = [header.join(","), row.join(",")];
     return csv.join("\r\n");
 
     function replacer(key, value) {
@@ -60,6 +63,12 @@ function MaskResults() {
         <div>
           {maskData.average_root_diameter
             ? `${maskData.average_root_diameter}`
+            : "No data"}
+        </div>
+        <strong>Average Root Length (mm):</strong>
+        <div>
+          {maskData.average_root_length
+            ? `${maskData.average_root_length}`
             : "No data"}
         </div>
         <strong>Total Root Length (mm):</strong>

@@ -199,12 +199,16 @@ def calculate_metrics(mask: np.ndarray, px_to_mm_ratio: float) -> dict:
             # Volume estimated as cylinder (area * length)
             total_volume_mm3 = total_area_mm * total_length_mm
             
+            # Average root length
+            avg_length_mm = total_length_mm / root_count if root_count > 0 else 0
+            
             metrics = {
                 'root_count': root_count,
                 'average_root_diameter': round(avg_diameter_mm, 4),
                 'total_root_length': round(total_length_mm, 4),
                 'total_root_area': round(total_area_mm, 4),
                 'total_root_volume': round(total_volume_mm3, 4),
+                'average_root_length': round(avg_length_mm, 4),
             }
         else:
             # No roots found
@@ -216,6 +220,7 @@ def calculate_metrics(mask: np.ndarray, px_to_mm_ratio: float) -> dict:
                 'total_root_length': 0.0,
                 'total_root_area': 0.0,
                 'total_root_volume': 0.0,
+                'average_root_length': 0.0,
             }
             
         logger.info(f"Calculated metrics: {metrics}")
@@ -236,4 +241,5 @@ def calculate_metrics(mask: np.ndarray, px_to_mm_ratio: float) -> dict:
             'total_root_length': 0.0,
             'total_root_area': 0.0,
             'total_root_volume': 0.0,
+            'average_root_length': 0.0,
         }

@@ -476,8 +476,8 @@ function ImageProcessor({ onProcessingComplete }) {
             console.log("Waiting for processing to begin...");
             await new Promise((resolve) => setTimeout(resolve, 3000));
 
-            // Then poll every 5 seconds for up to 60 seconds (12 attempts)
-            const maxAttempts = 15; // Increase max attempts to 75 seconds total
+            // Then poll every 5 seconds for up to 25 seconds (5 attempts)
+            const maxAttempts = 5; // Increase max attempts to 25 seconds total
             let attempt = 0;
 
             const pollForMasks = async () => {

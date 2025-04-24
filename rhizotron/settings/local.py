@@ -67,9 +67,11 @@ LOGGING = {
         },
         'file': {
             'level': 'INFO',
-            'class': 'logging.FileHandler',
+            'class': 'logging.handlers.RotatingFileHandler',
             'filename': 'logs/run.log',
-            'formatter': 'standard'
+            'formatter': 'standard',
+            'maxBytes': 10*1024*1024,  # 10MB per file
+            'backupCount': 5  # Keep up to 5 backup log files
         },
     },
     'formatters': {

@@ -114,15 +114,22 @@ function ResultsDisplay({ results = [] }) {
             "Root Count",
             "Average Root Diameter (mm)",
             "Total Root Length (mm)",
+            "Average Root Length (mm)",
             "Total Root Area (mm²)",
             "Total Root Volume (mm³)",
         ];
 
         const rows = results.map((result, index) => [
-            `Image ${index + 1}`,
+            // Prefer original name, fallback to Image N
+            result.imageName && result.imageName.length <= 32
+                ? result.imageName
+                : result.imageName
+                ? result.imageName.substring(0, 29) + '...'
+                : `Image ${index + 1}`,
             result.maskData?.root_count || 0,
             result.maskData?.average_root_diameter?.toFixed(2) || 0,
             result.maskData?.total_root_length?.toFixed(2) || 0,
+            result.maskData?.average_root_length?.toFixed(2) || 0,
             result.maskData?.total_root_area?.toFixed(2) || 0,
             result.maskData?.total_root_volume?.toFixed(2) || 0,
         ]);
@@ -299,8 +306,13 @@ function ResultsDisplay({ results = [] }) {
                                         gutterBottom
                                         variant="h6"
                                         component="div"
+                                        title={result.imageName}
                                     >
-                                        Image {index + 1}
+                                        {result.imageName
+                                            ? result.imageName.length > 32
+                                                ? result.imageName.substring(0, 29) + '...'
+                                                : result.imageName
+                                            : `Image ${index + 1}`}
                                     </Typography>
                                     <Box sx={{ mb: 1 }}>
                                         <Chip
@@ -358,8 +370,15 @@ function ResultsDisplay({ results = [] }) {
                             variant="scrollable"
                             scrollButtons="auto"
                         >
-                            {results.map((_, index) => (
-                                <Tab key={index} label={`Image ${index + 1}`} />
+                            {results.map((result, index) => (
+                                <Tab key={index}
+                                    label={result.imageName
+                                        ? result.imageName.length > 20
+                                            ? result.imageName.substring(0, 17) + '...'
+                                            : result.imageName
+                                        : `Image ${index + 1}`}
+                                    title={result.imageName}
+                                />
                             ))}
                         </Tabs>
                     </Box>
@@ -544,6 +563,19 @@ function ResultsDisplay({ results = [] }) {
                                                         {(
                                                             result.maskData
                                                                 ?.total_root_length ||
+                                                            0
+                                                        ).toFixed(2)}{" "}
+                                                        mm
+                                                    </TableCell>
+                                                </TableRow>
+                                                <TableRow>
+                                                    <TableCell>
+                                                        Average Root Length
+                                                    </TableCell>
+                                                    <TableCell align="right">
+                                                        {(
+                                                            result.maskData
+                                                                ?.average_root_length ||
                                                             0
                                                         ).toFixed(2)}{" "}
                                                         mm
