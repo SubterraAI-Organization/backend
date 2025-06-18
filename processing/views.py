@@ -17,7 +17,10 @@ from rest_framework.response import Response
 from drf_spectacular.utils import extend_schema, extend_schema_view, OpenApiParameter, OpenApiTypes
 
 from processing.models import Dataset, Picture, Mask, Model, ModelType
-from processing.serializers import DatasetSerializer, PictureSerializer, MaskSerializer, LabelMeSerializer, ModelSerializer
+from processing.serializers import (
+    DatasetSerializer, PictureSerializer, MaskSerializer, LabelMeSerializer, ModelSerializer,
+    RefinementPredictionSerializer, MultiImageMaskSerializer, BulkPredictionSerializer
+)
 from processing.permissions import IsOwnerOrReadOnly
 from segmentation import masks, calculate_metrics
 
@@ -132,37 +135,49 @@ class PictureViewSet(viewsets.ModelViewSet):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
     @extend_schema(tags=['masks'],
-                   summary='Predict masks for multiple images',
-                   parameters=[
-                       OpenApiParameter(name='ids', type=str, location='query', required=True),
-                       OpenApiParameter(name='confidence_threshold', type=float, location='query', required=False),
-                   ],
-                   responses={201: None})
-    @action(detail=False, methods=['post'], url_path='predict', serializer_class=MaskSerializer)
+                   summary='Predict masks for multiple images with optional refinement',
+                   request=BulkPredictionSerializer,
+                   responses={201: MultiImageMaskSerializer(many=True)})
+    @action(detail=False, methods=['post'], url_path='predict', serializer_class=BulkPredictionSerializer)
     def bulk_predict(self, request: HttpRequest, dataset_pk: int = None) -> Response:
-        # Check if image id parameter exists
-        ids = request.query_params.get('ids')
-        if not ids:
+        # Prepare data for validation - prioritize request body over query params
+        validation_data = {
+            'ids': request.data.get('ids') or request.query_params.get('ids'),
+            'model_type': request.data.get('model_type', 'unet'),
+            'confidence_threshold': request.data.get('confidence_threshold'),
+            'area_threshold': request.data.get('area_threshold', request.data.get('threshold', 0)),
+            'use_refinement': request.data.get('use_refinement', False),
+            'refinement_method': request.data.get('refinement_method', 'additive')
+        }
+        
+        if not validation_data['ids']:
             return Response({'detail': 'Missing "ids" parameter.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Get model type from request data
-        model_type_str = request.data.get('model_type', 'unet')
-        confidence_threshold = request.data.get('confidence_threshold', None)
-        threshold = request.data.get('threshold', 0)
+        # Validate and extract parameters using serializer
+        serializer = self.get_serializer(data=validation_data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+            
+        validated_data = serializer.validated_data
+        model_type_str = validated_data.get('model_type', 'unet')
+        confidence_threshold = validated_data.get('confidence_threshold', None)
+        threshold = validated_data.get('area_threshold', 0)
+        use_refinement = validated_data.get('use_refinement', False)
+        refinement_method = validated_data.get('refinement_method', 'additive')
+        
+        # Use the validated IDs from the serializer
+        validated_ids = validated_data.get('ids')
         
         try:
             # Try to convert to uppercase to match enum
             model_type = ModelType[model_type_str.upper()]
-            print(f"Using model type: {model_type}")
+            print(f"Using model type: {model_type}, refinement: {use_refinement}")
         except (KeyError, AttributeError):
             print(f"Invalid model type: {model_type_str}, defaulting to UNET")
             model_type = ModelType.UNET
 
-        # Parse ids
-        try:
-            ids = [int(id) for id in ids.split(',')]
-        except ValueError:
-            return Response({'detail': 'Invalid "ids" parameter.'}, status=status.HTTP_400_BAD_REQUEST)
+        # Use the validated IDs (already parsed by serializer)
+        ids = validated_ids
 
         # Get images
         images = Picture.objects.filter(id__in=ids, dataset_id=dataset_pk)
@@ -181,8 +196,13 @@ class PictureViewSet(viewsets.ModelViewSet):
             for image in images:
                 try:
                     print(f"Processing image {image.id}: {image.filename}")
-                    result = predict_image(image, model_type, area_threshold=threshold, 
-                                          confidence_threshold=confidence_threshold)
+                    result = predict_image(
+                        image, model_type, 
+                        area_threshold=threshold, 
+                        confidence_threshold=confidence_threshold,
+                        use_refinement=use_refinement,
+                        refinement_method=refinement_method
+                    )
                     if result:
                         successful_count += 1
                         print(f"Successfully processed image {image.id}, mask ID: {result.id}")
@@ -285,35 +305,39 @@ class MaskViewSet(viewsets.ModelViewSet):
 
         area_threshold = serializer.validated_data['threshold']
 
-        # Get model type string and validate it
-        model_type_str = request.data.get('model_type', 'unet')
-        if not model_type_str:
-            model_type_str = 'unet'  # Default to UNET
+        # Validate request data using RefinementPredictionSerializer
+        prediction_serializer = RefinementPredictionSerializer(data=request.data)
+        if not prediction_serializer.is_valid():
+            return Response(prediction_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+            
+        validated_data = prediction_serializer.validated_data
+        model_type_str = validated_data.get('model_type', 'unet')
+        confidence_threshold = validated_data.get('confidence_threshold', None)
+        use_refinement = validated_data.get('use_refinement', False)
+        refinement_method = validated_data.get('refinement_method', 'additive')
             
         # Convert to ModelType enum
         try:
             # Try to convert to uppercase to match enum
             model_type = ModelType[model_type_str.upper()]
-            print(f"Using model type: {model_type}")
+            print(f"Using model type: {model_type}, refinement: {use_refinement}")
         except (KeyError, AttributeError):
             print(f"Invalid model type: {model_type_str}, defaulting to UNET")
             model_type = ModelType.UNET
-        
-        # Extract confidence threshold from request
-        confidence_threshold = request.data.get('confidence_threshold')
-        if confidence_threshold is not None:
-            confidence_threshold = float(confidence_threshold)
 
         # Log what we're processing
-        print(f"Processing image {image_pk} with model type {model_type}, area threshold {area_threshold}, and confidence threshold {confidence_threshold}")
+        print(f"Processing image {image_pk} with model type {model_type}, area threshold {area_threshold}, confidence threshold {confidence_threshold}, refinement: {use_refinement}")
 
         try:
             # Use direct processing instead of async for better debugging
             from processing.services import predict_image
-            new_image = predict_image(original, model_type, area_threshold, confidence_threshold)
+            new_image = predict_image(
+                original, model_type, area_threshold, confidence_threshold,
+                use_refinement=use_refinement, refinement_method=refinement_method
+            )
             if new_image is None:
                 return Response({'detail': 'Error creating mask'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-            serializer = self.get_serializer(new_image)
+            serializer = MultiImageMaskSerializer(new_image)
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         except Exception as e:
             print(f"Error processing image: {str(e)}")

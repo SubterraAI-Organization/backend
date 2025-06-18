@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import axios from "axios";
 import {
     Box,
@@ -25,8 +25,11 @@ import {
 import ModelSelector from "./ModelSelector";
 import DatasetCreator from "./DatasetCreator";
 import ImageUploader from "./ImageUploader";
+import RefinementToggle from "./RefinementToggle";
+import MultiImageViewer from "./MultiImageViewer";
 import { useMaskData } from "../context/MaskDataContext";
-import { imageApi, handleApiError } from "../utils/api";
+import { imageApi, maskApi, handleApiError } from "../utils/api";
+import ResultsDisplay from "./ResultsDisplay";
 
 const steps = [
     "Select Model",
@@ -46,19 +49,36 @@ function ImageProcessor({ onProcessingComplete }) {
     const [activeStep, setActiveStep] = useState(0);
     const [selectedModel, setSelectedModel] = useState(null);
     const [currentDataset, setCurrentDataset] = useState(null);
+    const [datasetName, setDatasetName] = useState("");
     const [images, setImages] = useState([]);
     const [uploadedImages, setUploadedImages] = useState([]);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState(null);
     const [results, setResults] = useState([]);
-    const [areaThreshold, setAreaThreshold] = useState(20);
-    const [confidenceThreshold, setConfidenceThreshold] = useState(0.5);
+    const [areaThreshold, setAreaThreshold] = useState(15);
+    const [confidenceThreshold, setConfidenceThreshold] = useState(0.3);
     const [isUploading, setIsUploading] = useState(false);
+    const [useRefinement, setUseRefinement] = useState(false);
+    const [refinementMethod, setRefinementMethod] = useState("additive");
+    const [processingStatus, setProcessingStatus] = useState(null); // null, 'predicting', 'refining'
 
-    // Update confidence threshold when model changes
+    // Add ref for DatasetCreator
+    const datasetCreatorRef = useRef();
+
+    useEffect(() => {
+        // Set model-specific default confidence thresholds
+        if (selectedModel) {
+            if (selectedModel.toLowerCase().includes("yolo")) {
+                setConfidenceThreshold(0.3);
+            } else {
+                setConfidenceThreshold(0.7);
+            }
+        }
+    }, [selectedModel]);
+
     const handleModelChange = (model) => {
         setSelectedModel(model);
-        setConfidenceThreshold(DEFAULT_CONFIDENCE_THRESHOLDS[model] || 0.5);
+        setError(null);
     };
 
     const handleBack = () => {
@@ -67,6 +87,22 @@ function ImageProcessor({ onProcessingComplete }) {
     };
 
     const handleNext = async () => {
+        // If on dataset creation step, trigger dataset creation
+        if (activeStep === 1) {
+            if (datasetCreatorRef.current?.canCreate) {
+                try {
+                    await datasetCreatorRef.current.createDataset();
+                    // Success will be handled by handleDatasetCreated which advances the step
+                } catch (error) {
+                    setError("Failed to create dataset. Please try again.");
+                }
+                return;
+            } else {
+                setError("Please enter a dataset name");
+                return;
+            }
+        }
+
         // If going from image upload step to processing step, upload images first
         if (activeStep === 2) {
             const unuploadedImages = images.filter((img) => !img.id);
@@ -160,7 +196,13 @@ function ImageProcessor({ onProcessingComplete }) {
                 );
             case 1:
                 return (
-                    <DatasetCreator onDatasetCreated={handleDatasetCreated} />
+                    <DatasetCreator
+                        onDatasetCreated={handleDatasetCreated}
+                        ref={datasetCreatorRef}
+                        hideButton={true}
+                        datasetName={datasetName}
+                        onDatasetNameChange={setDatasetName}
+                    />
                 );
             case 2:
                 return (
@@ -169,6 +211,13 @@ function ImageProcessor({ onProcessingComplete }) {
                             <Typography variant="h6" gutterBottom>
                                 Processing Parameters
                             </Typography>
+
+                            {/* Refinement Toggle */}
+                            <RefinementToggle
+                                enabled={useRefinement}
+                                onChange={setUseRefinement}
+                                disabled={loading}
+                            />
 
                             <Grid container spacing={3}>
                                 <Grid item xs={12} sm={6}>
@@ -371,18 +420,19 @@ function ImageProcessor({ onProcessingComplete }) {
         try {
             setLoading(true);
             setError(null);
+            setProcessingStatus("predicting");
 
             // Get IDs of uploaded images
             const uploadedImageIds = images
                 .filter((img) => img.id)
-                .map((img) => img.id)
-                .join(",");
+                .map((img) => img.id);
 
-            if (!uploadedImageIds) {
+            if (!uploadedImageIds.length) {
                 setError(
                     "No uploaded images to process. Please upload images first."
                 );
                 setLoading(false);
+                setProcessingStatus(null);
                 return;
             }
 
@@ -390,67 +440,45 @@ function ImageProcessor({ onProcessingComplete }) {
             if (!selectedModel) {
                 setError("Please select a model type first.");
                 setLoading(false);
+                setProcessingStatus(null);
                 return;
             }
 
             console.log(
-                `Processing images with model type: ${selectedModel}, confidence threshold: ${confidenceThreshold}, area threshold: ${areaThreshold}`
+                `Processing images with model type: ${selectedModel}, confidence threshold: ${confidenceThreshold}, area threshold: ${areaThreshold}, refinement: ${useRefinement}`
             );
-            console.log(`Image IDs to process: ${uploadedImageIds}`);
-
-            // First check if the worker is running by making a status request
-            try {
-                const statusResponse = await axios.get(
-                    `${import.meta.env.VITE_BACKEND_URL}/api/datasets/${
-                        currentDataset.id
-                    }`,
-                    {
-                        headers: {
-                            Authorization: import.meta.env.VITE_AUTHORIZATION,
-                            accept: "application/json",
-                            "X-CSRFTOKEN": import.meta.env.VITE_CSRFTOKEN,
-                        },
-                    }
-                );
-                console.log("Backend API is responsive:", statusResponse);
-            } catch (statusErr) {
-                console.error("Backend API status check failed:", statusErr);
-                setError(
-                    "Could not connect to the backend API. Please check your network connection."
-                );
-                setLoading(false);
-                return;
-            }
-
-            // Construct request payload
-            const requestPayload = {
-                threshold: areaThreshold,
-                model_type: selectedModel.toLowerCase(), // Ensure lowercase for consistency
-                confidence_threshold: confidenceThreshold,
-            };
-
-            console.log("Request payload:", requestPayload);
+            console.log(`Image IDs to process: ${uploadedImageIds.join(",")}`);
 
             try {
-                const response = await axios.post(
-                    `${import.meta.env.VITE_BACKEND_URL}/api/datasets/${
-                        currentDataset.id
-                    }/images/predict/?ids=${uploadedImageIds}`,
-                    requestPayload,
-                    {
-                        headers: {
-                            Authorization: import.meta.env.VITE_AUTHORIZATION,
-                            accept: "application/json",
-                            "Content-Type": "application/json",
-                            "X-CSRFTOKEN": import.meta.env.VITE_CSRFTOKEN,
-                        },
-                    }
+                // Use the enhanced bulk prediction API
+                const options = {
+                    modelType: selectedModel.toLowerCase(),
+                    confidenceThreshold: confidenceThreshold,
+                    areaThreshold: areaThreshold,
+                    useRefinement: useRefinement,
+                    refinementMethod: refinementMethod,
+                };
+
+                console.log("Prediction options:", options);
+
+                // Update status if refinement is enabled
+                if (useRefinement) {
+                    setProcessingStatus("predicting");
+                    setTimeout(() => {
+                        if (loading) setProcessingStatus("refining");
+                    }, 3000); // Show refining status after initial prediction
+                }
+
+                const response = await maskApi.bulkPredict(
+                    currentDataset.id,
+                    uploadedImageIds,
+                    options
                 );
 
                 console.log("Prediction API response:", response);
 
                 // Start the process to fetch masks
-                fetchMasks(uploadedImageIds);
+                fetchMasks(uploadedImageIds.join(","));
             } catch (apiError) {
                 console.error("Prediction API error:", apiError);
                 console.log("Error response:", apiError.response?.data);
@@ -462,11 +490,13 @@ function ImageProcessor({ onProcessingComplete }) {
                 }
                 setError(errorMsg);
                 setLoading(false);
+                setProcessingStatus(null);
             }
         } catch (error) {
             console.error("Image processing error:", error);
             setError(error.response?.data?.detail || error.message);
             setLoading(false);
+            setProcessingStatus(null);
         }
     };
 
@@ -654,6 +684,7 @@ function ImageProcessor({ onProcessingComplete }) {
                         }
 
                         setLoading(false);
+                        setProcessingStatus(null);
                     } else {
                         // Continue polling
                         setTimeout(pollForMasks, 5000); // Wait 5 seconds before trying again
@@ -665,6 +696,7 @@ function ImageProcessor({ onProcessingComplete }) {
                             `Failed to fetch image data. Server responded with: ${fetchErr.message}`
                         );
                         setLoading(false);
+                        setProcessingStatus(null);
                     } else {
                         // Continue polling despite error
                         setTimeout(pollForMasks, 5000);
@@ -680,6 +712,7 @@ function ImageProcessor({ onProcessingComplete }) {
                 "Failed to fetch processed images. Please try again later."
             );
             setLoading(false);
+            setProcessingStatus(null);
         }
     };
 
@@ -731,7 +764,22 @@ function ImageProcessor({ onProcessingComplete }) {
                             }
                         >
                             {loading ? (
-                                <CircularProgress size={24} />
+                                <Box
+                                    sx={{
+                                        display: "flex",
+                                        alignItems: "center",
+                                        gap: 1,
+                                    }}
+                                >
+                                    <CircularProgress size={20} />
+                                    <span>
+                                        {processingStatus === "predicting" &&
+                                            "Predicting..."}
+                                        {processingStatus === "refining" &&
+                                            "Refining..."}
+                                        {!processingStatus && "Processing..."}
+                                    </span>
+                                </Box>
                             ) : (
                                 "Process Images"
                             )}
@@ -743,6 +791,7 @@ function ImageProcessor({ onProcessingComplete }) {
                             onClick={handleNext}
                             disabled={
                                 (activeStep === 0 && !selectedModel) ||
+                                (activeStep === 1 && !datasetName.trim()) ||
                                 (activeStep === 2 && images.length === 0) ||
                                 loading ||
                                 isUploading
@@ -750,6 +799,8 @@ function ImageProcessor({ onProcessingComplete }) {
                         >
                             {isUploading ? (
                                 <CircularProgress size={24} />
+                            ) : activeStep === 1 ? (
+                                "Create Dataset"
                             ) : (
                                 "Next"
                             )}

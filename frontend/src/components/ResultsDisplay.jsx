@@ -30,6 +30,7 @@ import ZoomInIcon from "@mui/icons-material/ZoomIn";
 import CompareIcon from "@mui/icons-material/Compare";
 import CloseIcon from "@mui/icons-material/Close";
 import { useMaskData } from "../context/MaskDataContext";
+import MultiImageViewer from "./MultiImageViewer";
 
 function ResultsDisplay({ results = [] }) {
     const { maskData, setMaskData } = useMaskData();
@@ -124,7 +125,7 @@ function ResultsDisplay({ results = [] }) {
             result.imageName && result.imageName.length <= 32
                 ? result.imageName
                 : result.imageName
-                ? result.imageName.substring(0, 29) + '...'
+                ? result.imageName.substring(0, 29) + "..."
                 : `Image ${index + 1}`,
             result.maskData?.root_count || 0,
             result.maskData?.average_root_diameter?.toFixed(2) || 0,
@@ -310,7 +311,10 @@ function ResultsDisplay({ results = [] }) {
                                     >
                                         {result.imageName
                                             ? result.imageName.length > 32
-                                                ? result.imageName.substring(0, 29) + '...'
+                                                ? result.imageName.substring(
+                                                      0,
+                                                      29
+                                                  ) + "..."
                                                 : result.imageName
                                             : `Image ${index + 1}`}
                                     </Typography>
@@ -371,12 +375,18 @@ function ResultsDisplay({ results = [] }) {
                             scrollButtons="auto"
                         >
                             {results.map((result, index) => (
-                                <Tab key={index}
-                                    label={result.imageName
-                                        ? result.imageName.length > 20
-                                            ? result.imageName.substring(0, 17) + '...'
-                                            : result.imageName
-                                        : `Image ${index + 1}`}
+                                <Tab
+                                    key={index}
+                                    label={
+                                        result.imageName
+                                            ? result.imageName.length > 20
+                                                ? result.imageName.substring(
+                                                      0,
+                                                      17
+                                                  ) + "..."
+                                                : result.imageName
+                                            : `Image ${index + 1}`
+                                    }
                                     title={result.imageName}
                                 />
                             ))}
@@ -391,134 +401,26 @@ function ResultsDisplay({ results = [] }) {
                                     selectedTab === index ? "block" : "none",
                             }}
                         >
-                            <Grid container spacing={3}>
-                                <Grid item xs={12} md={6}>
-                                    <Card>
-                                        <Box sx={{ position: "relative" }}>
-                                            {result.imageUrl ? (
-                                                <CardMedia
-                                                    component="img"
-                                                    height="300"
-                                                    image={result.imageUrl}
-                                                    alt={`Original image ${
-                                                        index + 1
-                                                    }`}
-                                                    sx={{
-                                                        objectFit: "contain",
-                                                        bgcolor: "#f5f5f5",
-                                                    }}
-                                                />
-                                            ) : (
-                                                <Box
-                                                    sx={{
-                                                        height: 300,
-                                                        display: "flex",
-                                                        alignItems: "center",
-                                                        justifyContent:
-                                                            "center",
-                                                        bgcolor: "#f5f5f5",
-                                                    }}
-                                                >
-                                                    <Typography color="text.secondary">
-                                                        Image not available
-                                                    </Typography>
-                                                </Box>
-                                            )}
-                                            {result.imageUrl && (
-                                                <IconButton
-                                                    sx={{
-                                                        position: "absolute",
-                                                        top: 8,
-                                                        right: 8,
-                                                        bgcolor:
-                                                            "rgba(255,255,255,0.7)",
-                                                    }}
-                                                    onClick={() =>
-                                                        handleOpenDialog(
-                                                            result.imageUrl,
-                                                            "Original Image"
-                                                        )
-                                                    }
-                                                >
-                                                    <ZoomInIcon />
-                                                </IconButton>
-                                            )}
-                                        </Box>
-                                        <CardContent>
-                                            <Typography
-                                                variant="h6"
-                                                align="center"
-                                            >
-                                                Original Image
-                                            </Typography>
-                                        </CardContent>
-                                    </Card>
-                                </Grid>
-                                <Grid item xs={12} md={6}>
-                                    <Card>
-                                        <Box sx={{ position: "relative" }}>
-                                            {result.maskData?.image ? (
-                                                <CardMedia
-                                                    component="img"
-                                                    height="300"
-                                                    image={
-                                                        result.maskData.image
-                                                    }
-                                                    alt={`Processed mask ${
-                                                        index + 1
-                                                    }`}
-                                                    sx={{
-                                                        objectFit: "contain",
-                                                        bgcolor: "#f5f5f5",
-                                                    }}
-                                                />
-                                            ) : (
-                                                <Box
-                                                    sx={{
-                                                        height: 300,
-                                                        display: "flex",
-                                                        alignItems: "center",
-                                                        justifyContent:
-                                                            "center",
-                                                        bgcolor: "#f5f5f5",
-                                                    }}
-                                                >
-                                                    <Typography color="text.secondary">
-                                                        Mask not available
-                                                    </Typography>
-                                                </Box>
-                                            )}
-                                            {result.maskData?.image && (
-                                                <IconButton
-                                                    sx={{
-                                                        position: "absolute",
-                                                        top: 8,
-                                                        right: 8,
-                                                        bgcolor:
-                                                            "rgba(255,255,255,0.7)",
-                                                    }}
-                                                    onClick={() =>
-                                                        handleOpenDialog(
-                                                            result.maskData
-                                                                .image,
-                                                            "Processed Mask"
-                                                        )
-                                                    }
-                                                >
-                                                    <ZoomInIcon />
-                                                </IconButton>
-                                            )}
-                                        </Box>
-                                        <CardContent>
-                                            <Typography
-                                                variant="h6"
-                                                align="center"
-                                            >
-                                                Processed Mask
-                                            </Typography>
-                                        </CardContent>
-                                    </Card>
-                                </Grid>
+                            {/* Multi-Image Viewer */}
+                            <MultiImageViewer
+                                originalImage={
+                                    result.imageUrl ||
+                                    result.maskData?.original_image
+                                }
+                                overlayImage={result.maskData?.overlay_image}
+                                imageTitle={`Analysis Results - ${
+                                    result.imageName || `Image ${index + 1}`
+                                }`}
+                                loading={loading}
+                                error={
+                                    !result.imageUrl && !result.maskData?.image
+                                        ? "Image data not available"
+                                        : null
+                                }
+                                onImageClick={handleOpenDialog}
+                            />
+
+                            <Grid container spacing={3} sx={{ mt: 2 }}>
                                 <Grid item xs={12}>
                                     <TableContainer component={Paper}>
                                         <Table>

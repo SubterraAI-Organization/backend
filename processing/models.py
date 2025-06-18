@@ -44,6 +44,16 @@ class Mask(ExportModelOperationsMixin('mask'), models.Model):
     created = models.DateTimeField(auto_now_add=True)
     updated = models.DateTimeField(auto_now=True)
 
+    # Multi-image outputs
+    original_image = models.ImageField(upload_to='predictions/original/', editable=False, blank=True, null=True)
+    overlay_image = models.ImageField(upload_to='predictions/overlay/', editable=False, blank=True, null=True)
+    mask_image = models.ImageField(upload_to='predictions/mask/', editable=False, blank=True, null=True)
+    
+    # Refinement fields
+    use_refinement = models.BooleanField(default=False)
+    refinement_method = models.CharField(max_length=50, default='additive', 
+                                       choices=[('additive', 'Additive'), ('max', 'Maximum'), ('weighted', 'Weighted')])
+
     root_count = models.IntegerField(default=0)
     average_root_diameter = models.FloatField(default=0)
     total_root_length = models.FloatField(default=0)

@@ -48,8 +48,8 @@ def predict(model: nn.Module, image_path: str, area_threshold: int = 15, confide
         if isinstance(model, YOLO):
             try:
                 print(f"Processing with YOLO model")
-                # YOLO prediction logic
-                results = model(image_path, conf=confidence_threshold)
+                # YOLO prediction logic - disable labels and confidence display
+                results = model(image_path, conf=confidence_threshold, show_labels=False, show_conf=False)
                 print(f"YOLO prediction complete, got {len(results)} results")
                 
                 if len(results) > 0 and hasattr(results[0], 'masks') and results[0].masks is not None:

@@ -26,7 +26,8 @@ class MaskSerializer(serializers.ModelSerializer):
         model = Mask
         fields = '__all__'
         read_only_fields = ['created', 'updated', 'image', 'mask', 'picture', 'root_count',
-                            'average_root_diameter', 'total_root_length', 'total_root_area', 'total_root_volume']
+                            'average_root_diameter', 'total_root_length', 'total_root_area', 'total_root_volume',
+                            'original_image', 'overlay_image', 'mask_image']
         write_only_fields = ['threshold']
         extra_kwargs = {
             'threshold': {'required': False, 'default': 0},
@@ -68,3 +69,76 @@ class AnalysisSerializer(serializers.Serializer):
 class SegmentationSerializer(serializers.Serializer):
     image = ImageField(required=False)
     threshold = IntegerField(required=False, default=25)
+
+
+class RefinementPredictionSerializer(serializers.Serializer):
+    model_type = CharField(required=False, default='unet')
+    confidence_threshold = FloatField(required=False)
+    area_threshold = IntegerField(required=False, default=0)
+    use_refinement = serializers.BooleanField(required=False, default=False)
+    refinement_method = CharField(required=False, default='additive')
+    
+    def validate_model_type(self, value):
+        valid_types = ['unet', 'yolo']
+        if value.lower() not in valid_types:
+            raise serializers.ValidationError(f"model_type must be one of: {valid_types}")
+        return value.lower()
+    
+    def validate_refinement_method(self, value):
+        valid_methods = ['additive', 'max', 'weighted']
+        if value.lower() not in valid_methods:
+            raise serializers.ValidationError(f"refinement_method must be one of: {valid_methods}")
+        return value.lower()
+
+
+class MultiImageMaskSerializer(serializers.ModelSerializer):
+    """Enhanced mask serializer that includes all image outputs"""
+    
+    class Meta:
+        model = Mask
+        fields = [
+            'id', 'picture', 'threshold', 'created', 'updated',
+            'use_refinement', 'refinement_method',
+            'original_image', 'overlay_image', 'mask_image', 'image',
+            'root_count', 'average_root_diameter', 'total_root_length', 
+            'total_root_area', 'total_root_volume', 'average_root_length'
+        ]
+        read_only_fields = [
+            'id', 'created', 'updated', 'image', 'picture',
+            'original_image', 'overlay_image', 'mask_image',
+            'root_count', 'average_root_diameter', 'total_root_length', 
+            'total_root_area', 'total_root_volume', 'average_root_length'
+        ]
+
+
+class BulkPredictionSerializer(serializers.Serializer):
+    """Serializer for bulk prediction requests with refinement support"""
+    ids = CharField(help_text="Comma-separated list of image IDs")
+    model_type = CharField(required=False, default='unet')
+    confidence_threshold = FloatField(required=False)
+    area_threshold = IntegerField(required=False, default=0)
+    use_refinement = serializers.BooleanField(required=False, default=False)
+    refinement_method = CharField(required=False, default='additive')
+    
+    def validate_model_type(self, value):
+        valid_types = ['unet', 'yolo']
+        if value.lower() not in valid_types:
+            raise serializers.ValidationError(f"model_type must be one of: {valid_types}")
+        return value.lower()
+    
+    def validate_refinement_method(self, value):
+        valid_methods = ['additive', 'max', 'weighted']
+        if value.lower() not in valid_methods:
+            raise serializers.ValidationError(f"refinement_method must be one of: {valid_methods}")
+        return value.lower()
+        
+    def validate_ids(self, value):
+        if not value:
+            raise serializers.ValidationError("IDs parameter is required")
+        try:
+            ids = [int(id.strip()) for id in value.split(',') if id.strip()]
+            if not ids:
+                raise serializers.ValidationError("At least one valid ID is required")
+            return ids
+        except ValueError:
+            raise serializers.ValidationError("All IDs must be valid integers")

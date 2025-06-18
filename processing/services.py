@@ -7,11 +7,15 @@ from django.db.models.query import QuerySet
 from django.core.files import File
 
 from segmentation import predict, calculate_metrics
+from segmentation.utils.refinement_predict import predict_with_refinement
+from segmentation.utils.multi_image_output import generate_prediction_outputs, save_prediction_outputs
 from processing.models import Picture, Mask
 from processing.models import ModelType
 
 
-def predict_image(image: Picture, model_type: ModelType, area_threshold: Optional[int] = 0, confidence_threshold: Optional[float] = None) -> None:
+def predict_image(image: Picture, model_type: ModelType, area_threshold: Optional[int] = 0, 
+                 confidence_threshold: Optional[float] = None, use_refinement: bool = False,
+                 refinement_method: str = 'additive') -> Mask:
     """
     Process a single image with the specified model and create a mask object.
     
@@ -20,6 +24,8 @@ def predict_image(image: Picture, model_type: ModelType, area_threshold: Optiona
         model_type: The type of model to use (UNET, YOLO, etc.)
         area_threshold: Optional threshold for minimum area size
         confidence_threshold: Optional threshold for prediction confidence
+        use_refinement: Whether to apply refinement prediction
+        refinement_method: Method for combining masks ('additive', 'max', 'weighted')
     
     Returns:
         Created Mask object
@@ -167,8 +173,19 @@ def predict_image(image: Picture, model_type: ModelType, area_threshold: Optiona
             image_path = image.image.path
             print(f"Processing image at path: {image_path}")
             
-            # Pass confidence_threshold to predict function
-            mask = predict(model, image_path, area_threshold, confidence_threshold=confidence_threshold)
+            # Use refinement prediction if requested
+            if use_refinement:
+                print(f"Using refinement prediction with method: {refinement_method}")
+                mask = predict_with_refinement(
+                    model, image_path, area_threshold, 
+                    confidence_threshold=confidence_threshold, 
+                    use_refinement=True,
+                    combination_method=refinement_method
+                )
+            else:
+                print(f"Using standard prediction")
+                mask = predict(model, image_path, area_threshold, confidence_threshold=confidence_threshold)
+                
             logger.info(f"Successfully predicted mask for image ID: {image.id}")
             print(f"Successfully predicted mask for image ID: {image.id}")
         except Exception as e:
@@ -178,6 +195,23 @@ def predict_image(image: Picture, model_type: ModelType, area_threshold: Optiona
             raise
 
         try:
+            # Generate multi-image outputs BEFORE normalizing the mask
+            print(f"Generating multi-image outputs for image ID: {image.id}")
+            try:
+                outputs = generate_prediction_outputs(
+                    image_path, mask, image.filename_noext, 
+                    model=model, confidence_threshold=confidence_threshold
+                )
+                files = save_prediction_outputs(outputs, image.filename_noext)
+                logger.info(f"Successfully generated multi-image outputs for image ID: {image.id}")
+                print(f"Successfully generated multi-image outputs for image ID: {image.id}")
+            except Exception as e:
+                logger.error(f"Failed to generate multi-image outputs for image ID {image.id}: {str(e)}")
+                print(f"Failed to generate multi-image outputs for image ID {image.id}: {str(e)}")
+                # Continue with basic mask if multi-image generation fails
+                files = {'original': None, 'overlay': None}
+            
+            # Now normalize the mask for metrics calculation
             mask_arr = np.array(mask) / 255
             mask_arr = mask_arr.astype(np.uint8)
 
@@ -201,8 +235,17 @@ def predict_image(image: Picture, model_type: ModelType, area_threshold: Optiona
 
             mask_file = File(mask_byte_arr, name=f'{image.filename_noext}_mask.png')
             
-            # Create and save the mask
-            mask_obj = Mask(picture=image, image=mask_file, threshold=area_threshold, **metrics)
+            # Create and save the mask with new fields
+            mask_obj = Mask(
+                picture=image, 
+                image=mask_file, 
+                threshold=area_threshold,
+                use_refinement=use_refinement,
+                refinement_method=refinement_method,
+                original_image=files.get('original'),
+                overlay_image=files.get('overlay'),
+                **metrics
+            )
             mask_obj.save()
             
             logger.info(f"Successfully created and saved mask for image ID: {image.id}")
@@ -222,7 +265,9 @@ def predict_image(image: Picture, model_type: ModelType, area_threshold: Optiona
         raise
 
 
-def bulk_predict_images(images: QuerySet[Picture], model_type: ModelType, area_threshold: Optional[int] = 0, confidence_threshold: Optional[float] = None) -> None:
+def bulk_predict_images(images: QuerySet[Picture], model_type: ModelType, area_threshold: Optional[int] = 0, 
+                       confidence_threshold: Optional[float] = None, use_refinement: bool = False,
+                       refinement_method: str = 'additive') -> None:
     """
     Process multiple images with the specified model and create mask objects for each.
     
@@ -397,6 +442,23 @@ def bulk_predict_images(images: QuerySet[Picture], model_type: ModelType, area_t
                     continue
 
                 try:
+                    # Generate multi-image outputs BEFORE normalizing the mask
+                    print(f"Generating multi-image outputs for image ID: {image.id}")
+                    try:
+                        outputs = generate_prediction_outputs(
+                            image_path, mask, image.filename_noext, 
+                            model=model, confidence_threshold=confidence_threshold
+                        )
+                        files = save_prediction_outputs(outputs, image.filename_noext)
+                        logger.info(f"Successfully generated multi-image outputs for image ID: {image.id}")
+                        print(f"Successfully generated multi-image outputs for image ID: {image.id}")
+                    except Exception as e:
+                        logger.error(f"Failed to generate multi-image outputs for image ID {image.id}: {str(e)}")
+                        print(f"Failed to generate multi-image outputs for image ID {image.id}: {str(e)}")
+                        # Continue with basic mask if multi-image generation fails
+                        files = {'original': None, 'overlay': None}
+                    
+                    # Now normalize the mask for metrics calculation
                     mask_arr = np.array(mask) / 255
                     mask_arr = mask_arr.astype(np.uint8)
                     
@@ -418,10 +480,25 @@ def bulk_predict_images(images: QuerySet[Picture], model_type: ModelType, area_t
                     mask.save(mask_byte_arr, format='PNG')
                     mask_byte_arr.seek(0)  # Rewind to beginning
                     
-                    mask = File(mask_byte_arr, name=f'{image.filename_noext}_mask.png')
-                    masks.append(Mask(picture=image, image=mask, threshold=area_threshold, **metrics))
-                    logger.info(f"Mask object created for image ID: {image.id}")
-                    print(f"Mask object created for image ID: {image.id}")
+                    mask_file = File(mask_byte_arr, name=f'{image.filename_noext}_mask.png')
+                    
+                    # Create and save the mask with new fields
+                    mask_obj = Mask(
+                        picture=image, 
+                        image=mask_file, 
+                        threshold=area_threshold,
+                        use_refinement=use_refinement,
+                        refinement_method=refinement_method,
+                        original_image=files.get('original'),
+                        overlay_image=files.get('overlay'),
+                        **metrics
+                    )
+                    mask_obj.save()
+                    
+                    logger.info(f"Successfully created and saved mask for image ID: {image.id}")
+                    print(f"Successfully created and saved mask for image ID: {image.id}")
+                    
+                    masks.append(mask_obj)
                 except Exception as e:
                     logger.error(f"Failed to process mask for image ID {image.id}: {str(e)}")
                     print(f"Failed to process mask for image ID {image.id}: {str(e)}")
